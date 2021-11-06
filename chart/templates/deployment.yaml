@@ -57,7 +57,7 @@ spec:
             - name: KAFKA_BOOTSTRAP_ADDRESS
               value: "{{ template "<CHARTNAME>.kafka.bootstrapAddress" . }}"
             - name: DEV_MODE
-              value: {{ .Values.devMode }}
+              value: {{ .Values.devMode | quote }}
           livenessProbe:
             httpGet:
               path: /actuator/health/liveness
