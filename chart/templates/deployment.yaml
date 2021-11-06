@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "<CHARTNAME>.fullname" . }}
+  labels:
+    {{- include "<CHARTNAME>.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "<CHARTNAME>.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+      {{ if .Values.rollme }}
+        rollme: {{ randAlphaNum 5 | quote }}
+      {{- end }}
+      labels:
+        {{- include "<CHARTNAME>.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "<CHARTNAME>.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        - name: {{ include "<CHARTNAME>.fullname" . }}-init-wait-kafka
+          image: {{ .Values.init.default.image }}
+          command: [ 'sh', '-c', 'for i in $(seq 1 300); do nc -zvw1 {{ template "<CHARTNAME>.kafka.fullname" . }} {{ .Values.kafka.service.port }} && exit 0 || sleep 3; done; exit 1' ]
+        - name: {{ include "<CHARTNAME>.fullname" . }}-init-wait-postgresql
+          image: {{ .Values.init.postgresql.image }}
+          command: ['sh', '-c', 'until pg_isready -h {{ template "<CHARTNAME>.database.fullname" . }} -p 5432; do echo waiting for database; sleep 2; done;']
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: debug
+              containerPort: 8000
+              protocol: TCP
+          env:
+            - name: DB_USERNAME
+              value: {{ .Values.db.username }}
+            - name: DB_PASSWORD
+              value: {{ .Values.db.password }}
+            - name: DB_URL
+              value: "{{ template "<CHARTNAME>.database.url" . }}"
+            - name: KAFKA_BOOTSTRAP_ADDRESS
+              value: "{{ template "<CHARTNAME>.kafka.bootstrapAddress" . }}"
+            - name: DEV_MODE
+              value: {{ .Values.devMode }}
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: 60
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            initialDelaySeconds: 60
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
